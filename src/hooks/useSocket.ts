@@ -19,18 +19,35 @@ export const useSocket = ({ userId, role }: UseSocketProps) => {
 
     // Set up event listeners
     const handleConnected = () => {
+      console.log('Socket connected successfully');
       setIsConnected(true);
       setRooms(socketService.getRooms());
     };
 
     const handleMessageReceived = (message: Message) => {
+      console.log('Message received:', message);
       if (currentRoom && message.roomId === currentRoom) {
         setMessages(prev => [...prev, message]);
       }
     };
 
     const handleRoomUpdated = (room: Room) => {
-      setRooms(prev => prev.map(r => r.id === room.id ? room : r));
+      console.log('Room updated:', room);
+      setRooms(prev => {
+        const existingIndex = prev.findIndex(r => r.id === room.id);
+        if (existingIndex >= 0) {
+          const newRooms = [...prev];
+          newRooms[existingIndex] = room;
+          return newRooms;
+        } else {
+          return [...prev, room];
+        }
+      });
+      
+      // If this is the current room, update messages
+      if (currentRoom === room.id) {
+        setMessages(room.messages);
+      }
     };
 
     socketService.on('connected', handleConnected);
@@ -42,17 +59,21 @@ export const useSocket = ({ userId, role }: UseSocketProps) => {
       socketService.off('message-received', handleMessageReceived);
       socketService.off('room-updated', handleRoomUpdated);
       socketService.disconnect();
+      setIsConnected(false);
     };
   }, [userId, role, currentRoom]);
 
   const joinRoom = useCallback((roomId: string) => {
+    console.log('Joining room:', roomId);
     socketService.joinRoom(roomId);
     setCurrentRoom(roomId);
     
-    // Load room messages
+    // Load room messages if room exists
     const room = socketService.getRoom(roomId);
     if (room) {
       setMessages(room.messages);
+    } else {
+      setMessages([]);
     }
   }, []);
 
@@ -65,7 +86,8 @@ export const useSocket = ({ userId, role }: UseSocketProps) => {
   }, [currentRoom]);
 
   const sendMessage = useCallback((text: string) => {
-    if (currentRoom) {
+    if (currentRoom && text.trim()) {
+      console.log('Sending message:', text);
       socketService.sendMessage(currentRoom, text);
     }
   }, [currentRoom]);

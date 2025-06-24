@@ -1,4 +1,6 @@
 
+import { io, Socket } from 'socket.io-client';
+
 interface Message {
   id: string;
   text: string;
@@ -18,7 +20,7 @@ interface Room {
 }
 
 class SocketService {
-  private ws: WebSocket | null = null;
+  private socket: Socket | null = null;
   private listeners: Map<string, Function[]> = new Map();
   private rooms: Map<string, Room> = new Map();
   private currentUserId: string = '';
@@ -28,83 +30,95 @@ class SocketService {
     this.currentUserId = userId;
     this.currentRole = role;
     
-    // Simulate WebSocket connection
+    // Connect to your Socket.io server
+    this.socket = io('http://localhost:3001', {
+      transports: ['websocket', 'polling']
+    });
+
     console.log(`Connecting to chat server as ${role} with ID: ${userId}`);
-    
-    // Create initial rooms for demo
-    this.initializeRooms();
-    
-    // Simulate connection established
-    setTimeout(() => {
-      this.emit('connected', { userId, role });
-    }, 500);
+
+    // Set up Socket.io event listeners
+    this.socket.on('connect', () => {
+      console.log('Connected to Socket.io server');
+      this.socket?.emit('join', { userId, role });
+    });
+
+    this.socket.on('connected', (data) => {
+      console.log('Server confirmed connection:', data);
+      this.initializeRooms();
+      this.emit('connected', data);
+    });
+
+    this.socket.on('message-received', (message) => {
+      // Convert timestamp string back to Date object
+      message.timestamp = new Date(message.timestamp);
+      message.isOwn = message.userId === this.currentUserId;
+      
+      const room = this.rooms.get(message.roomId);
+      if (room) {
+        room.messages.push(message);
+      }
+      
+      this.emit('message-received', message);
+    });
+
+    this.socket.on('room-joined', (room) => {
+      room.messages = room.messages.map((msg: any) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+        isOwn: msg.userId === this.currentUserId
+      }));
+      room.createdAt = new Date(room.createdAt);
+      this.rooms.set(room.id, room);
+      this.emit('room-updated', room);
+    });
+
+    this.socket.on('room-updated', (room) => {
+      room.messages = room.messages.map((msg: any) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp),
+        isOwn: msg.userId === this.currentUserId
+      }));
+      room.createdAt = new Date(room.createdAt);
+      this.rooms.set(room.id, room);
+      this.emit('room-updated', room);
+    });
+
+    this.socket.on('disconnect', () => {
+      console.log('Disconnected from Socket.io server');
+    });
+
+    this.socket.on('connect_error', (error) => {
+      console.error('Socket.io connection error:', error);
+    });
   }
 
   disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
     }
     console.log('Disconnected from chat server');
   }
 
   joinRoom(roomId: string) {
-    const room = this.rooms.get(roomId);
-    if (room && !room.participants.includes(this.currentUserId)) {
-      room.participants.push(this.currentUserId);
-      this.emit('joined-room', { roomId, userId: this.currentUserId });
-      this.emit('room-updated', room);
-      console.log(`Joined room: ${roomId}`);
+    if (this.socket) {
+      this.socket.emit('join-room', roomId);
+      console.log(`Joining room: ${roomId}`);
     }
   }
 
   leaveRoom(roomId: string) {
-    const room = this.rooms.get(roomId);
-    if (room) {
-      room.participants = room.participants.filter(id => id !== this.currentUserId);
-      this.emit('left-room', { roomId, userId: this.currentUserId });
-      this.emit('room-updated', room);
+    if (this.socket) {
+      this.socket.emit('leave-room', roomId);
       console.log(`Left room: ${roomId}`);
     }
   }
 
   sendMessage(roomId: string, text: string) {
-    const room = this.rooms.get(roomId);
-    if (!room) return;
-
-    const message: Message = {
-      id: Date.now().toString(),
-      text,
-      sender: this.currentRole,
-      timestamp: new Date(),
-      isOwn: true,
-      roomId,
-      userId: this.currentUserId
-    };
-
-    room.messages.push(message);
-    
-    // Simulate real-time message delivery
-    setTimeout(() => {
-      this.emit('message-received', message);
-      
-      // Simulate response from other party after 2 seconds
-      if (this.currentRole === 'customer') {
-        setTimeout(() => {
-          const responseMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: this.getWorkerResponse(text),
-            sender: 'worker',
-            timestamp: new Date(),
-            isOwn: false,
-            roomId,
-            userId: 'worker-1'
-          };
-          room.messages.push(responseMessage);
-          this.emit('message-received', responseMessage);
-        }, 2000);
-      }
-    }, 100);
+    if (this.socket) {
+      this.socket.emit('send-message', { roomId, text });
+    }
   }
 
   getRooms(): Room[] {
@@ -138,45 +152,21 @@ class SocketService {
   }
 
   private initializeRooms() {
-    const room1: Room = {
+    // Create a default room and join it
+    const defaultRoom: Room = {
       id: 'room-1',
-      name: 'Customer Support - Alex Johnson',
+      name: 'Customer Support - Live Chat',
       participants: [],
-      messages: [
-        {
-          id: '1',
-          text: 'Hello! How can I help you today?',
-          sender: 'worker',
-          timestamp: new Date(Date.now() - 300000),
-          isOwn: this.currentRole === 'worker',
-          roomId: 'room-1',
-          userId: 'worker-1'
-        },
-        {
-          id: '2',
-          text: 'Hi! I need help with my account settings.',
-          sender: 'customer',
-          timestamp: new Date(Date.now() - 240000),
-          isOwn: this.currentRole === 'customer',
-          roomId: 'room-1',
-          userId: 'customer-1'
-        }
-      ],
-      createdAt: new Date(Date.now() - 600000)
+      messages: [],
+      createdAt: new Date()
     };
 
-    this.rooms.set('room-1', room1);
-  }
-
-  private getWorkerResponse(customerMessage: string): string {
-    const responses = [
-      "I understand your concern. Let me help you with that.",
-      "Thank you for reaching out. I'll look into this right away.",
-      "That's a great question! Here's what I can do to help.",
-      "I see the issue. Let me provide you with a solution.",
-      "Thanks for the information. I'll resolve this for you."
-    ];
-    return responses[Math.floor(Math.random() * responses.length)];
+    this.rooms.set('room-1', defaultRoom);
+    
+    // Auto-join the default room
+    setTimeout(() => {
+      this.joinRoom('room-1');
+    }, 1000);
   }
 }
 
