@@ -6,51 +6,38 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Paperclip, MoreVertical, Phone, Video, UserCheck, Clock } from "lucide-react";
+import { Send, Paperclip, MoreVertical, Phone, Video, UserCheck, Clock, Wifi, WifiOff } from "lucide-react";
 import MessageBubble from "@/components/MessageBubble";
 import CustomerList from "@/components/CustomerList";
+import { useSocket } from "@/hooks/useSocket";
 
 interface ChatInterfaceProps {
   role: 'customer' | 'worker';
   isAuthenticated: boolean;
 }
 
-interface Message {
-  id: string;
-  text: string;
-  sender: 'customer' | 'worker';
-  timestamp: Date;
-  isOwn: boolean;
-}
-
 const ChatInterface = ({ role, isAuthenticated }: ChatInterfaceProps) => {
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      text: "Hello! How can I help you today?",
-      sender: "worker",
-      timestamp: new Date(Date.now() - 300000),
-      isOwn: role === 'worker'
-    },
-    {
-      id: "2", 
-      text: "Hi! I'm having trouble with my account settings.",
-      sender: "customer",
-      timestamp: new Date(Date.now() - 240000),
-      isOwn: role === 'customer'
-    },
-    {
-      id: "3",
-      text: "I'd be happy to help you with that. Can you tell me more about the specific issue you're experiencing?",
-      sender: "worker", 
-      timestamp: new Date(Date.now() - 180000),
-      isOwn: role === 'worker'
-    }
-  ]);
-  
-  const [activeCustomer, setActiveCustomer] = useState<string | null>(role === 'customer' ? 'self' : 'customer-1');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Generate a user ID (in real app, this would come from authentication)
+  const userId = `${role}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  const {
+    isConnected,
+    rooms,
+    messages,
+    currentRoom,
+    joinRoom,
+    sendMessage
+  } = useSocket({ userId, role });
+
+  // Auto-join first room for demo
+  useEffect(() => {
+    if (rooms.length > 0 && !currentRoom) {
+      joinRoom('room-1');
+    }
+  }, [rooms, currentRoom, joinRoom]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -61,15 +48,8 @@ const ChatInterface = ({ role, isAuthenticated }: ChatInterfaceProps) => {
   }, [messages]);
 
   const handleSendMessage = () => {
-    if (message.trim()) {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        text: message,
-        sender: role,
-        timestamp: new Date(),
-        isOwn: true
-      };
-      setMessages([...messages, newMessage]);
+    if (message.trim() && currentRoom) {
+      sendMessage(message);
       setMessage("");
     }
   };
@@ -85,7 +65,11 @@ const ChatInterface = ({ role, isAuthenticated }: ChatInterfaceProps) => {
     <div className="grid lg:grid-cols-4 gap-6 h-[calc(100vh-200px)]">
       {role === 'worker' && (
         <div className="lg:col-span-1">
-          <CustomerList activeCustomer={activeCustomer} onCustomerSelect={setActiveCustomer} />
+          <CustomerList 
+            activeCustomer={currentRoom || 'room-1'} 
+            onCustomerSelect={joinRoom}
+            rooms={rooms}
+          />
         </div>
       )}
       
@@ -101,14 +85,20 @@ const ChatInterface = ({ role, isAuthenticated }: ChatInterfaceProps) => {
                 </Avatar>
                 <div>
                   <CardTitle className="text-lg">
-                    {role === 'customer' ? 'Support Agent' : 'Customer #1234'}
+                    {role === 'customer' ? 'Support Agent' : 'Customer Support Chat'}
                   </CardTitle>
                   <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                    <span className="text-sm text-gray-500">Online</span>
+                    {isConnected ? (
+                      <Wifi className="w-3 h-3 text-green-500" />
+                    ) : (
+                      <WifiOff className="w-3 h-3 text-red-500" />
+                    )}
+                    <span className="text-sm text-gray-500">
+                      {isConnected ? 'Connected' : 'Connecting...'}
+                    </span>
                     <Badge variant="secondary" className="text-xs">
                       <Clock className="w-3 h-3 mr-1" />
-                      Active 2m
+                      Room: {currentRoom || 'None'}
                     </Badge>
                   </div>
                 </div>
@@ -148,20 +138,24 @@ const ChatInterface = ({ role, isAuthenticated }: ChatInterfaceProps) => {
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     onKeyPress={handleKeyPress}
-                    placeholder="Type your message..."
+                    placeholder={isConnected ? "Type your message..." : "Connecting..."}
                     className="pr-12 border-gray-200 focus:border-blue-500"
+                    disabled={!isConnected || !currentRoom}
                   />
                 </div>
                 <Button 
                   onClick={handleSendMessage}
-                  disabled={!message.trim()}
+                  disabled={!message.trim() || !isConnected || !currentRoom}
                   className="bg-blue-600 hover:bg-blue-700"
                 >
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
               <p className="text-xs text-gray-500 mt-2">
-                Press Enter to send, Shift + Enter for new line
+                {isConnected 
+                  ? "Press Enter to send, Shift + Enter for new line" 
+                  : "Connecting to chat server..."
+                }
               </p>
             </div>
           </CardContent>
